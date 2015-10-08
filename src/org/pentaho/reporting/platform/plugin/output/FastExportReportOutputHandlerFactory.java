@@ -16,26 +16,23 @@
  */
 package org.pentaho.reporting.platform.plugin.output;
 
+import org.pentaho.reporting.engine.classic.core.ClassicEngineBoot;
+import org.pentaho.reporting.libraries.base.config.ExtendedConfiguration;
+import org.pentaho.reporting.platform.plugin.SimpleReportingAction;
+
 import java.io.IOException;
 import java.io.InputStream;
 
-import org.pentaho.reporting.platform.plugin.SimpleReportingAction;
-
-public class FastExportReportOutputHandlerFactory extends DefaultReportOutputHandlerFactory
-{
-  public FastExportReportOutputHandlerFactory()
-  {
+public class FastExportReportOutputHandlerFactory extends DefaultReportOutputHandlerFactory {
+  public FastExportReportOutputHandlerFactory() {
   }
 
-  protected ReportOutputHandler createXlsxOutput(final ReportOutputHandlerSelector selector) throws IOException
-  {
-    if (isXlsxAvailable() == false)
-    {
+  protected ReportOutputHandler createXlsxOutput(final ReportOutputHandlerSelector selector) throws IOException {
+    if (isXlsxAvailable() == false) {
       return null;
     }
     InputStream input = selector.getInput(SimpleReportingAction.XLS_WORKBOOK_PARAM, null, InputStream.class);
-    if (input != null)
-    {
+    if (input != null) {
       XLSXOutput xlsxOutput = new XLSXOutput();
       xlsxOutput.setTemplateDataFromStream(input);
       return xlsxOutput;
@@ -44,15 +41,12 @@ public class FastExportReportOutputHandlerFactory extends DefaultReportOutputHan
     return new FastXLSXOutput();
   }
 
-  protected ReportOutputHandler createXlsOutput(final ReportOutputHandlerSelector selector) throws IOException
-  {
-    if (isXlsxAvailable() == false)
-    {
+  protected ReportOutputHandler createXlsOutput(final ReportOutputHandlerSelector selector) throws IOException {
+    if (isXlsxAvailable() == false) {
       return null;
     }
     InputStream input = selector.getInput(SimpleReportingAction.XLS_WORKBOOK_PARAM, null, InputStream.class);
-    if (input != null)
-    {
+    if (input != null) {
       XLSOutput xlsOutput = new XLSOutput();
       xlsOutput.setTemplateDataFromStream(input);
       return xlsOutput;
@@ -61,30 +55,40 @@ public class FastExportReportOutputHandlerFactory extends DefaultReportOutputHan
     return new FastXLSOutput();
   }
 
-  protected ReportOutputHandler createCsvOutput()
-  {
-    if (isCsvAvailable() == false)
-    {
+  protected ReportOutputHandler createCsvOutput() {
+    if (isCsvAvailable() == false) {
       return null;
     }
     return new FastCSVOutput();
   }
 
-  protected ReportOutputHandler createHtmlStreamOutput(final ReportOutputHandlerSelector selector)
-  {
-    if (isHtmlStreamAvailable() == false)
-    {
+  protected ReportOutputHandler createHtmlStreamOutput(final ReportOutputHandlerSelector selector) {
+    if (isHtmlStreamAvailable() == false) {
       return null;
     }
-    if (selector.isUseJcrOutput())
-    {
+    if (selector.isUseJcrOutput()) {
       return new FastStreamJcrHtmlOutput(computeContentHandlerPattern(selector), selector.getJcrOutputPath());
     }
-    else
-    {
+    else {
       return new FastStreamHtmlOutput(computeContentHandlerPattern(selector));
     }
   }
 
+  @Override
+  protected ReportOutputHandler createHtmlPageOutput(final ReportOutputHandlerSelector selector) {
+    if (isHtmlPageAvailable() == false) {
+      return null;
+    }
 
+    final ExtendedConfiguration config = ClassicEngineBoot.getInstance().getExtendedConfig();
+    if (config.getBoolProperty("org.pentaho.reporting.platform.plugin.output.CachePageableHtmlContent")) {
+      // use the content repository
+      final String contentHandlerPattern = computeContentHandlerPattern(selector);
+      final CachingPageableHTMLOutput pageableHTMLOutput = new CachingPageableHTMLOutput();
+      pageableHTMLOutput.setContentHandlerPattern(contentHandlerPattern);
+      return pageableHTMLOutput;
+    }
+
+    return super.createHtmlPageOutput(selector);
+  }
 }
