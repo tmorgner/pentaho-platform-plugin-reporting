@@ -64,11 +64,21 @@ public class JobManager {
   }
 
   public JobManager( final boolean isSupportAsync, final long pollingIntervalMilliseconds,
+                     final long dialogThresholdMillisecond, final boolean promptForLocation ) {
+    if ( !isSupportAsync ) {
+      logger.info( ASYNC_DISABLED );
+    }
+    this.config = new Config( isSupportAsync, pollingIntervalMilliseconds, dialogThresholdMillisecond,
+      promptForLocation );
+  }
+
+  public JobManager( final boolean isSupportAsync, final long pollingIntervalMilliseconds,
                      final long dialogThresholdMillisecond ) {
     if ( !isSupportAsync ) {
       logger.info( ASYNC_DISABLED );
     }
-    this.config = new Config( isSupportAsync, pollingIntervalMilliseconds, dialogThresholdMillisecond );
+    this.config = new Config( isSupportAsync, pollingIntervalMilliseconds, dialogThresholdMillisecond,
+      Boolean.FALSE );
   }
 
   @GET @Path( "config" ) public Response getConfig() {
@@ -237,6 +247,24 @@ public class JobManager {
     return Response.ok().build();
   }
 
+  @GET @Path( "{job_id}/{folderId}/updateLocation" ) @Produces( "text/text" )
+  public Response updateLocation( @PathParam( "job_id" ) final String jobId,
+                                  @PathParam( "folderId" ) final String folderId ) {
+    final IPentahoAsyncExecutor executor = getExecutor();
+    final IPentahoSession session = PentahoSessionHolder.getSession();
+    final UUID uuid;
+    try {
+      uuid = UUID.fromString( jobId );
+    } catch ( final Exception e ) {
+      logger.error( INVALID_UUID + jobId );
+      return get404();
+    }
+
+    executor.updateSchedulingLocation( uuid, session, folderId );
+
+    return Response.ok().build();
+  }
+
   protected final Response get404() {
     return Response.status( Response.Status.NOT_FOUND ).build();
   }
@@ -277,7 +305,7 @@ public class JobManager {
   }
 
   protected static Response.ResponseBuilder calculateContentDisposition( final Response.ResponseBuilder response,
-                                                               final IAsyncReportState state ) {
+                                                                         final IAsyncReportState state ) {
     final org.pentaho.reporting.libraries.base.util.IOUtils utils = org.pentaho.reporting.libraries
       .base.util.IOUtils.getInstance();
 
@@ -304,13 +332,15 @@ public class JobManager {
     private final boolean isSupportAsync;
     private final long pollingIntervalMilliseconds;
     private final long dialogThresholdMilliseconds;
+    private final boolean promptForLocation;
 
 
     private Config( final boolean isSupportAsync, final long pollingIntervalMilliseconds,
-                    final long dialogThresholdMilliseconds ) {
+                    final long dialogThresholdMilliseconds, final boolean promptForLocation ) {
       this.isSupportAsync = isSupportAsync;
       this.pollingIntervalMilliseconds = pollingIntervalMilliseconds;
       this.dialogThresholdMilliseconds = dialogThresholdMilliseconds;
+      this.promptForLocation = promptForLocation;
     }
 
 
@@ -326,5 +356,8 @@ public class JobManager {
       return dialogThresholdMilliseconds;
     }
 
+    public boolean isPromptForLocation() {
+      return promptForLocation;
+    }
   }
 }

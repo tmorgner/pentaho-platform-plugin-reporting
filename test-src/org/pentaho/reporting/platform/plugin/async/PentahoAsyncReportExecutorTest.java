@@ -344,4 +344,31 @@ public class PentahoAsyncReportExecutorTest {
     assertEquals( 100, testListener.getRequestedPage() );
 
   }
+
+
+  @Test public void testUpdateSchedulingLocation() {
+
+    final PentahoAsyncExecutor exec = new PentahoAsyncExecutor( 1, autoSchedulerThreshold );
+
+    final TestListener testListener = new TestListener( "1", UUID.randomUUID(), "" );
+
+    // must have two separate instances, as callable holds unique ID and listener for each addTask(..)
+    final UUID id1 = exec.addTask( new PentahoAsyncReportExecution( "junit-path",
+      component, handler, session1, "not null", AuditWrapper.NULL ) {
+      @Override
+      protected AsyncReportStatusListener createListener( final UUID id,
+                                                          List<? extends ReportProgressListener> listeners ) {
+        return testListener;
+      }
+    }, session1 );
+
+    exec.schedule( id1, session1 );
+
+    final IAsyncReportState state = exec.getReportState( id1, session1 );
+    assertNotNull( state );
+    assertEquals( AsyncExecutionStatus.SCHEDULED, testListener.getState().getStatus() );
+    exec.updateSchedulingLocation( id1, session1, "/target" );
+
+
+  }
 }

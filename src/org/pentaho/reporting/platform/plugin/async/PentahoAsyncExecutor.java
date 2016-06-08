@@ -34,7 +34,11 @@ import org.pentaho.reporting.libraries.base.util.ArgumentNullException;
 import org.pentaho.reporting.platform.plugin.staging.AsyncJobFileStagingHandler;
 import org.pentaho.reporting.platform.plugin.staging.IFixedSizeStreamingContent;
 
+import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -57,6 +61,8 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
   private ListeningExecutorService executorService;
 
   private final int autoSchedulerThreshold;
+  private final MemorizeSchedulingLocationListener schedulingLocationListener;
+  private List<ISchedulingListener> writeToJcrListeners;
 
   /**
    * @param capacity
@@ -67,8 +73,11 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
     log.info( "Initialized reporting  async execution fixed thread pool with capacity: " + capacity );
     executorService =
       new DelegatedListenableExecutor( new ThreadPoolExecutor( capacity, capacity, 0L, TimeUnit.MILLISECONDS,
-        new LinkedBlockingQueue<Runnable>() ) );
+        new LinkedBlockingQueue<>() ) );
     PentahoSystem.addLogoutListener( this );
+    this.writeToJcrListeners = new ArrayList<>();
+    schedulingLocationListener = new MemorizeSchedulingLocationListener();
+    this.writeToJcrListeners.add( schedulingLocationListener );
   }
 
 
@@ -157,8 +166,20 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
           public void onSuccess( final IFixedSizeStreamingContent result ) {
             try {
               if ( session != null && !StringUtil.isEmpty( session.getName() ) ) {
-                SecurityHelper.getInstance().runAsUser( session.getName(),
-                  new WriteToJcrTask( runningTask, result.getStream() ) );
+
+                SecurityHelper.getInstance().runAsUser( session.getName(), () -> {
+                  final Serializable writtenTo = new WriteToJcrTask( runningTask, result.getStream() ).call();
+                  //We can be sure it succeed here and are ready to notify writeToJcrListeners
+                  final Iterator<ISchedulingListener> iterator = writeToJcrListeners.iterator();
+                  while ( iterator.hasNext() ) {
+                    final ISchedulingListener next = iterator.next();
+                    final boolean executed = next.onSchedulingCompleted( compositeKey, writtenTo );
+                    if ( executed ) {
+                      iterator.remove();
+                    }
+                  }
+                  return null;
+                } );
               }
 
             } catch ( final Exception e ) {
@@ -180,6 +201,22 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
         } );
       }
     }
+  }
+
+  @Override
+  public void updateSchedulingLocation( final UUID id, final IPentahoSession session, final Serializable folderId ) {
+    validateParams( id, session );
+    final CompositeKey key = new CompositeKey( session, id );
+    final Serializable fileId = schedulingLocationListener.getLocationMap().get( key );
+    final UpdateSchedulingLocationListener listener = new UpdateSchedulingLocationListener( key, folderId );
+    if ( null != fileId ) {
+      //Report is already finished and saved to default scheduling directory
+      listener.onSchedulingCompleted( key, fileId );
+    } else {
+      //Report is not finished yet,
+      writeToJcrListeners.add( listener );
+    }
+    schedulingLocationListener.getLocationMap().remove( key );
   }
 
   @Override public TReportState getReportState( final UUID id, final IPentahoSession session ) {
@@ -237,6 +274,14 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
       }
     }
 
+    //User can't update scheduling directory after logout, so we can clean location locationMap
+    final ConcurrentHashMap<CompositeKey, Serializable> locationMap = schedulingLocationListener.getLocationMap();
+    for ( final Map.Entry<CompositeKey, Serializable> entry : locationMap.entrySet() ) {
+      if ( session.getId().equals( entry.getKey().getSessionId() ) ) {
+        locationMap.remove( entry.getKey() );
+      }
+    }
+
     //If some files are still open directory won't be removed
     AsyncJobFileStagingHandler.cleanSession( session );
 
@@ -251,6 +296,8 @@ public class PentahoAsyncExecutor<TReportState extends IAsyncReportState>
     // forget all
     this.futures.clear();
     this.tasks.clear();
+    this.writeToJcrListeners.clear();
+    this.schedulingLocationListener.getLocationMap().clear();
 
     AsyncJobFileStagingHandler.cleanStagingDir();
   }

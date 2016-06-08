@@ -16,31 +16,23 @@
  * Copyright 2006 - 2016 Pentaho Corporation.  All rights reserved.
  */
 
-
 package org.pentaho.reporting.platform.plugin.async;
 
-import org.pentaho.platform.api.engine.IPentahoSession;
-import org.pentaho.reporting.platform.plugin.staging.IFixedSizeStreamingContent;
-
 import java.io.Serializable;
-import java.util.UUID;
-import java.util.concurrent.Future;
+import java.util.concurrent.ConcurrentHashMap;
 
-public interface IPentahoAsyncExecutor<TReportState extends IAsyncReportState> {
+class MemorizeSchedulingLocationListener implements ISchedulingListener {
 
-  Future<IFixedSizeStreamingContent> getFuture( UUID id, IPentahoSession session );
+  private ConcurrentHashMap<PentahoAsyncExecutor.CompositeKey, Serializable> locationMap = new ConcurrentHashMap<>();
 
-  void cleanFuture( UUID id, IPentahoSession session );
+  @Override
+  public boolean onSchedulingCompleted( final PentahoAsyncExecutor.CompositeKey key, final Serializable fileId ) {
+    locationMap.put( key, fileId );
+    //We don't want this one to be cleaned up
+    return Boolean.FALSE;
+  }
 
-  UUID addTask( IAsyncReportExecution<TReportState> task, IPentahoSession session );
-
-  TReportState getReportState( UUID id, IPentahoSession session );
-
-  void requestPage( UUID id, IPentahoSession session, int page );
-
-  void schedule( UUID uuid, IPentahoSession session );
-
-  void updateSchedulingLocation( UUID uuid, IPentahoSession session, Serializable folderId );
-
-  void shutdown();
+  public ConcurrentHashMap<PentahoAsyncExecutor.CompositeKey, Serializable> getLocationMap() {
+    return locationMap;
+  }
 }

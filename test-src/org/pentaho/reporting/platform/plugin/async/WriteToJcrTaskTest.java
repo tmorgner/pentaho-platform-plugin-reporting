@@ -24,6 +24,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.pentaho.platform.api.repository2.unified.IUnifiedRepository;
 import org.pentaho.platform.api.repository2.unified.RepositoryFile;
+import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.engine.core.system.boot.PlatformInitializationException;
 import org.pentaho.reporting.libraries.repository.ContentCreationException;
 import org.pentaho.reporting.libraries.repository.ContentEntity;
@@ -38,14 +39,19 @@ import org.pentaho.test.platform.engine.core.MicroPlatform;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutorCompletionService;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 import static org.mockito.Matchers.any;
+import static org.mockito.Matchers.startsWith;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -59,6 +65,9 @@ public class WriteToJcrTaskTest {
     microPlatform = MicroPlatformFactory.create();
     final IUnifiedRepository repository = mock( IUnifiedRepository.class );
     final ISchedulingDirectoryStrategy strategy = mock( ISchedulingDirectoryStrategy.class );
+    final RepositoryFile targetDir = mock( RepositoryFile.class );
+    when( strategy.getSchedulingDir( repository ) ).thenReturn( targetDir );
+    when( targetDir.getPath() ).thenReturn( "/test" );
     microPlatform.defineInstance( "IUnifiedRepository", repository );
     microPlatform.defineInstance( "ISchedulingDirectoryStrategy", strategy );
     microPlatform.start();
@@ -71,6 +80,11 @@ public class WriteToJcrTaskTest {
 
   @Test
   public void testPositiveScenario() throws Exception {
+    final UUID uuid = UUID.randomUUID();
+    final RepositoryFile file = mock( RepositoryFile.class );
+    when( file.getId() ).thenReturn( uuid.toString() );
+    when( PentahoSystem.get( IUnifiedRepository.class ).getFile( "/test/report.pdf" ) ).thenReturn(
+      file );
     final FakeLocation fakeLocation = new FakeLocation();
     final IFixedSizeStreamingContent content = mock( IFixedSizeStreamingContent.class );
     final IAsyncReportExecution reportExecution = mock( IAsyncReportExecution.class );
@@ -87,12 +101,17 @@ public class WriteToJcrTaskTest {
         return contentRepository;
       }
     };
-    assertTrue( toJcrTask.call() );
+    assertNotNull( toJcrTask.call() );
     assertTrue( fakeLocation.exists( "report.pdf" ) );
   }
 
   @Test
   public void testNoNames() throws Exception {
+    final UUID uuid = UUID.randomUUID();
+    final RepositoryFile file = mock( RepositoryFile.class );
+    when( file.getId() ).thenReturn( uuid.toString() );
+    when( PentahoSystem.get( IUnifiedRepository.class ).getFile( "/test/content.txt" ) ).thenReturn(
+      file );
     final FakeLocation fakeLocation = new FakeLocation();
     final IFixedSizeStreamingContent content = mock( IFixedSizeStreamingContent.class );
     final IAsyncReportExecution reportExecution = mock( IAsyncReportExecution.class );
@@ -109,12 +128,20 @@ public class WriteToJcrTaskTest {
         return contentRepository;
       }
     };
-    assertTrue( toJcrTask.call() );
+
+    assertEquals( uuid.toString(), toJcrTask.call() );
     assertTrue( fakeLocation.exists( "content.txt" ) );
   }
 
   @Test
   public void testAlreadyExists() throws Exception {
+    final UUID uuid = UUID.randomUUID();
+    final RepositoryFile file = mock( RepositoryFile.class );
+    when( file.getId() ).thenReturn( uuid.toString() );
+    when( PentahoSystem.get( IUnifiedRepository.class ).getFile( "/test/report.pdf" ) ).thenReturn(
+      file );
+    when( PentahoSystem.get( IUnifiedRepository.class ).getFile( "/test/report(1).pdf" ) ).thenReturn(
+      file );
     final FakeLocation fakeLocation = new FakeLocation();
     final IFixedSizeStreamingContent content = mock( IFixedSizeStreamingContent.class );
     final IAsyncReportExecution reportExecution = mock( IAsyncReportExecution.class );
@@ -131,9 +158,9 @@ public class WriteToJcrTaskTest {
         return contentRepository;
       }
     };
-    assertTrue( toJcrTask.call() );
+    assertNotNull( toJcrTask.call() );
     assertTrue( fakeLocation.exists( "report.pdf" ) );
-    assertTrue( toJcrTask.call() );
+    assertNotNull( toJcrTask.call() );
     assertTrue( fakeLocation.exists( "report.pdf" ) );
     assertTrue( fakeLocation.exists( "report(1).pdf" ) );
   }
@@ -157,74 +184,82 @@ public class WriteToJcrTaskTest {
         return contentRepository;
       }
     };
-    assertFalse( toJcrTask.call() );
+    assertNull( toJcrTask.call() );
   }
 
 
   @Test
   public void testConcurrentSave() throws Exception {
 
-    final FakeLocation fakeLocation = new FakeLocation();
+    final UUID uuid = UUID.randomUUID();
+    final RepositoryFile file = mock( RepositoryFile.class );
+    when( file.getId() ).thenReturn( uuid.toString() );
+    when( PentahoSystem.get( IUnifiedRepository.class ).getFile( startsWith( "/test" ) ) ).thenReturn(
+      file );
 
-    final IFixedSizeStreamingContent content = mock( IFixedSizeStreamingContent.class );
+    final CountDownLatch latch1 = new CountDownLatch( 1 );
+
+    final FakeLocation fakeLocation = new FakeLocation( latch1 );
+
+
     final IAsyncReportExecution reportExecution = mock( IAsyncReportExecution.class );
     final IAsyncReportState state = mock( IAsyncReportState.class );
     when( state.getMimeType() ).thenReturn( "application/pdf" );
     when( state.getPath() ).thenReturn( "report.prpt" );
     when( reportExecution.getState() ).thenReturn( state );
-    final NullInputStream inputStream = new NullInputStream( 100 );
-    when( content.getStream() ).thenReturn( inputStream );
 
     final ReportContentRepository contentRepository = mock( ReportContentRepository.class );
 
     when( contentRepository.getRoot() ).thenReturn( fakeLocation );
 
-    final WriteToJcrTask toJcrTask = new WriteToJcrTask( reportExecution, inputStream ) {
+
+    final WriteToJcrTask toJcrTask = new WriteToJcrTask( reportExecution, new InputStream() {
+      @Override public int read() throws IOException {
+        try {
+          Thread.sleep( 100 );
+        } catch ( final InterruptedException e ) {
+          e.printStackTrace();
+        }
+        return -1;
+      }
+    } ) {
       @Override protected ReportContentRepository getReportContentRepository( final RepositoryFile outputFolder ) {
         return contentRepository;
       }
     };
 
+    final ExecutorService executorService = Executors.newFixedThreadPool( 10 );
 
-    CompletionService<Boolean> completionService =
-      new ExecutorCompletionService<>( Executors.newFixedThreadPool( 10 ) );
-    int received = 0;
-    boolean errors = false;
+    final List<Future<Serializable>> results = new ArrayList<>();
+
     for ( int i = 0; i < 10; i++ ) {
-      completionService.submit( toJcrTask );
+      results.add( executorService.submit( toJcrTask ) );
     }
 
-    while ( received < 10 && !errors ) {
-      final Future<Boolean> take = completionService.take();
-      try {
-        final Boolean res = take.get();
-        if ( res ) {
-          received++;
-        } else {
-          errors = true;
-        }
-      } catch ( final Exception e ) {
-        errors = true;
-      }
+
+    latch1.countDown();
+
+    for ( final Future<Serializable> res : results ) {
+      assertNotNull( res.get() );
     }
-
-    assertFalse( errors );
-    assertTrue( received == 10 );
-
-    assertTrue( fakeLocation.exists( "report.pdf" ) );
-
-    for ( int i = 1; i < 10; i++ ) {
-      assertTrue( fakeLocation.exists( "report(" + i + ").pdf" ) );
-    }
-
-    completionService = null;
 
 
   }
 
 
   private class FakeLocation implements ContentLocation {
-    private ConcurrentHashSet<String> files = new ConcurrentHashSet<>();
+
+    private CountDownLatch latch;
+
+
+    public FakeLocation() {
+    }
+
+    public FakeLocation( final CountDownLatch firstLatch ) {
+      this.latch = firstLatch;
+    }
+
+    private Set<String> files = new ConcurrentHashSet<>();
 
     @Override public ContentEntity[] listContents() throws ContentIOException {
       throw new UnsupportedOperationException();
@@ -235,18 +270,28 @@ public class WriteToJcrTaskTest {
     }
 
     @Override public ContentItem createItem( final String s ) throws ContentCreationException {
+      try {
+        if ( latch != null ) {
+          latch.countDown();
+          latch.await();
+        }
+        Thread.sleep( 100 );
+      } catch ( final InterruptedException e ) {
+        e.printStackTrace();
+      }
       if ( exists( s ) ) {
         throw new ContentCreationException();
       } else {
         files.add( s );
+        final ContentItem mock = mock( ContentItem.class );
+        try {
+          when( mock.getOutputStream() ).thenReturn( new org.apache.commons.io.output.NullOutputStream() );
+        } catch ( ContentIOException | IOException e ) {
+          e.printStackTrace();
+        }
+        return mock;
       }
-      final ContentItem mock = mock( ContentItem.class );
-      try {
-        when( mock.getOutputStream() ).thenReturn( new org.apache.commons.io.output.NullOutputStream() );
-      } catch ( ContentIOException | IOException e ) {
-        e.printStackTrace();
-      }
-      return mock;
+
     }
 
     @Override public ContentLocation createLocation( final String s ) throws ContentCreationException {

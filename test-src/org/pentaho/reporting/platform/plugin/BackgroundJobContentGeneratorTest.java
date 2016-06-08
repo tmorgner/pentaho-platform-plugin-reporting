@@ -38,6 +38,7 @@ import org.pentaho.test.platform.engine.core.SimpleObjectFactory;
 
 import javax.servlet.http.HttpServletResponse;
 import java.io.InputStream;
+import java.io.Serializable;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -258,6 +259,10 @@ public class BackgroundJobContentGeneratorTest {
     }
 
     @Override public void schedule( UUID uuid, IPentahoSession session ) {
+
+    }
+
+    @Override public void updateSchedulingLocation( UUID uuid, IPentahoSession session, Serializable location ) {
 
     }
 

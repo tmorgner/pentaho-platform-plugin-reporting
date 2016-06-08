@@ -20,7 +20,9 @@ package org.pentaho.reporting.platform.plugin.async;
 import com.google.common.util.concurrent.ListenableFuture;
 import org.apache.commons.io.input.NullInputStream;
 import org.apache.cxf.jaxrs.client.WebClient;
+import org.junit.After;
 import org.junit.AfterClass;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
@@ -86,14 +88,14 @@ public class AsyncIT {
     microPlatform.define( ReportOutputHandlerFactory.class, FastExportReportOutputHandlerFactory.class );
     microPlatform
       .define( "IPluginCacheManager", new PluginCacheManagerImpl( new PluginSessionCache( fileSystemCacheBackend ) ) );
-    final PentahoAsyncExecutor<AsyncReportState> executor = new PentahoAsyncExecutor<>( 2 );
+    final PentahoAsyncExecutor<AsyncReportState> executor = spy( new PentahoAsyncExecutor<>( 2 ) );
     microPlatform.define( "IPentahoAsyncExecutor", executor );
     microPlatform.define( "ISchedulingDirectoryStrategy", new HomeSchedulingDirStrategy() );
     microPlatform.addLifecycleListener( new AsyncSystemListener() );
     microPlatform.start();
 
     session = new StandaloneSession();
-    PentahoSessionHolder.setSession( session );
+
   }
 
 
@@ -107,6 +109,16 @@ public class AsyncIT {
     provider = null;
   }
 
+  @After
+  public void after() {
+    reset( PentahoSystem.get( IPentahoAsyncExecutor.class ) );
+  }
+
+  @Before
+  public void before() {
+    PentahoSessionHolder.setSession( session );
+  }
+
   @Test
   public void testDefaultConfig() {
     final WebClient client = provider.getFreshClient();
@@ -115,20 +127,22 @@ public class AsyncIT {
     final Response response = client.get();
     final String json = response.readEntity( String.class );
     assertEquals( json,
-      "{\"pollingIntervalMilliseconds\":500,\"dialogThresholdMilliseconds\":1500,\"supportAsync\":true}" );
+      "{\"pollingIntervalMilliseconds\":500,\"dialogThresholdMilliseconds\":1500,\"promptForLocation\":false,"
+        + "\"supportAsync\":true}" );
   }
 
   @Test
   public void testCustomConfig() throws Exception {
     provider.stopServer();
-    provider.startServer( new JobManager( false, 100L, 300L ) );
+    provider.startServer( new JobManager( false, 100L, 300L, true ) );
     final String config = String.format( URL_FORMAT, "config", "" );
     final WebClient client = provider.getFreshClient();
     client.path( config );
     final Response response = client.get();
     final String json = response.readEntity( String.class );
     assertEquals( json,
-      "{\"pollingIntervalMilliseconds\":100,\"dialogThresholdMilliseconds\":300,\"supportAsync\":false}" );
+      "{\"pollingIntervalMilliseconds\":100,\"dialogThresholdMilliseconds\":300,\"promptForLocation\":true,"
+        + "\"supportAsync\":false}" );
     provider.stopServer();
     provider.startServer( new JobManager() );
   }
@@ -513,6 +527,41 @@ public class AsyncIT {
         }, session );
     }
 
+  }
+
+
+  @SuppressWarnings( "unchecked" )
+  @Test
+  public void testUpdateScheduleLocation() {
+    final IPentahoAsyncExecutor executor = PentahoSystem.get( IPentahoAsyncExecutor.class );
+    final IAsyncReportExecution mock = mockExec();
+
+
+    final UUID uuid = executor.addTask( mock, PentahoSessionHolder.getSession() );
+    WebClient client = provider.getFreshClient();
+    final UUID folderId = UUID.randomUUID();
+    final String config = "/reporting/api/jobs/" + uuid.toString() + "/" + folderId.toString() + "/updateLocation";
+    client.path( config );
+    Response response = client.get();
+    assertEquals( 200, response.getStatus() );
+    verify( executor, times( 1 ) )
+      .updateSchedulingLocation( any(), any(), any() );
+
+    STATUS = AsyncExecutionStatus.FAILED;
+  }
+
+  @SuppressWarnings( "unchecked" )
+  @Test
+  public void testUpdateScheduleLocationWrongID() {
+
+    final UUID folderId = UUID.randomUUID();
+    WebClient client = provider.getFreshClient();
+    final String config = "/reporting/api/jobs/notuuid/" + folderId.toString() + "/updateLocation";
+    client.path( config );
+    Response response = client.get();
+    assertEquals( 404, response.getStatus() );
+
+    STATUS = AsyncExecutionStatus.FAILED;
   }
 
   private PentahoAsyncReportExecution mockExec() {
