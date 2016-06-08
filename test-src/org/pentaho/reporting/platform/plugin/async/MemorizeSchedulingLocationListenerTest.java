@@ -20,7 +20,6 @@ package org.pentaho.reporting.platform.plugin.async;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 import static org.mockito.Mockito.mock;
 
 public class MemorizeSchedulingLocationListenerTest {
@@ -31,9 +30,8 @@ public class MemorizeSchedulingLocationListenerTest {
       new MemorizeSchedulingLocationListener();
     final PentahoAsyncExecutor.CompositeKey mock = mock( PentahoAsyncExecutor.CompositeKey.class );
     final String path = "test.prpt";
-    assertFalse( memorizeSchedulingLocationListener
-      .onSchedulingCompleted( mock, path ) );
-    assertEquals( path, memorizeSchedulingLocationListener.getLocationMap().get( mock ) );
+    memorizeSchedulingLocationListener.recordOutputFile( mock, path );
+    assertEquals( path, memorizeSchedulingLocationListener.lookupOutputFile( mock ) );
   }
 
 }

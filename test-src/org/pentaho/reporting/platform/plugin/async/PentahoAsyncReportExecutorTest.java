@@ -345,7 +345,10 @@ public class PentahoAsyncReportExecutorTest {
 
   }
 
-
+  // todo: Test what happens when multiple schedule operations for the same job occur.
+  // todo: test what happens when the job finishes while you are setting up a new location handler.
+  // todo: Test what happens when there is no such job.
+  // todo: Test what happens when your session's name is empty.
   @Test public void testUpdateSchedulingLocation() {
 
     final PentahoAsyncExecutor exec = new PentahoAsyncExecutor( 1, autoSchedulerThreshold );

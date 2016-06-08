@@ -124,6 +124,10 @@ public class JobManagerTest {
     assertEquals( response3.getStatus(), 404 );
   }
 
+  // todo: test update scheduled location.
+  // todo: test invalid job-id when updating scheduled location.
+  // todo: Test what happens if prompt-for-location is disabled, but I call the REST end-point anyway.
+
   @BeforeClass public static void setUp() throws Exception {
     provider = new JaxRsServerProvider();
     provider.startServer( new JobManager() );

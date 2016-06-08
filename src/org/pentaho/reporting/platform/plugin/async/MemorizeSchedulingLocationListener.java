@@ -21,18 +21,28 @@ package org.pentaho.reporting.platform.plugin.async;
 import java.io.Serializable;
 import java.util.concurrent.ConcurrentHashMap;
 
-class MemorizeSchedulingLocationListener implements ISchedulingListener {
+/**
+ * I am using a more verbose set of operations here, as they better express the intent of what you want to do with
+ * the class.
+ */
+public class MemorizeSchedulingLocationListener {
 
   private ConcurrentHashMap<PentahoAsyncExecutor.CompositeKey, Serializable> locationMap = new ConcurrentHashMap<>();
 
-  @Override
-  public boolean onSchedulingCompleted( final PentahoAsyncExecutor.CompositeKey key, final Serializable fileId ) {
+  public void recordOutputFile(final PentahoAsyncExecutor.CompositeKey key, final Serializable fileId ) {
     locationMap.put( key, fileId );
     //We don't want this one to be cleaned up
-    return Boolean.FALSE;
   }
 
-  public ConcurrentHashMap<PentahoAsyncExecutor.CompositeKey, Serializable> getLocationMap() {
-    return locationMap;
+  public Serializable lookupOutputFile( final PentahoAsyncExecutor.CompositeKey key ) {
+    return locationMap.get(key);
+  }
+
+  public void shutdown() {
+    this.locationMap.clear();
+  }
+
+  public void onLogout( final String sessionId ) {
+    this.locationMap.keySet().removeIf(k -> k.isSameSession(sessionId));
   }
 }
