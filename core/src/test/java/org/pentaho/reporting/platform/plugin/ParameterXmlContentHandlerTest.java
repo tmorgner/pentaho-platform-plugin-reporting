@@ -20,6 +20,7 @@ package org.pentaho.reporting.platform.plugin;
 
 import com.google.common.collect.Lists;
 import org.apache.commons.collections.map.HashedMap;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -70,8 +71,10 @@ import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,7 +165,7 @@ public class ParameterXmlContentHandlerTest {
       }
     };
 
-    final Set<Object> changedParameters = Collections.singleton( "changed_unverified" );
+    final Set<String> changedParameters = Collections.singleton( "changed_unverified" );
 
     final ParameterDefinitionEntry changed =
         new DefaultListParameter( "query", "keyColumn", "textColumn", "changed_unverified", false, false, String.class );
@@ -173,10 +176,10 @@ public class ParameterXmlContentHandlerTest {
     final ParameterDefinitionEntry plain = new PlainParameter( "plain", String.class );
 
     //Initial call
-    final Object changedResult = handler.getSelections( changed, null, inputs );
-    final Object unchangedResult = handler.getSelections( unchanged, null, inputs );
-    final Object verifiedResult = handler.getSelections( verified, null, inputs );
-    final Object plainResult = handler.getSelections( plain, null, inputs );
+    final Object changedResult = handler.getSelections( changed, new HashSet<>(), inputs );
+    final Object unchangedResult = handler.getSelections( unchanged, new HashSet<>(), inputs );
+    final Object verifiedResult = handler.getSelections( verified, new HashSet<>(), inputs );
+    final Object plainResult = handler.getSelections( plain, new HashSet<>(), inputs );
 
     assertEquals( "value", changedResult );
     assertEquals( "value1", unchangedResult );
@@ -199,11 +202,10 @@ public class ParameterXmlContentHandlerTest {
   @Test
   public void testParameterDependencies() throws ReportDataFactoryException {
 
-    final ReportParameterValues computedParameterValues = mock( ReportParameterValues.class );
     final ParameterContext parameterContext = mock( ParameterContext.class );
 
-    final ParameterDefinitionEntry[] entries = getDefinitions();
-    when( definition.getParameterDefinitions() ).thenReturn( entries );
+    final Map<String,ParameterDefinitionEntry> entries = getDefinitions();
+    when( definition.getParameterDefinitions() ).thenReturn( entries.values().toArray(new ParameterDefinitionEntry[0]) );
 
     // this factory will be used to get parameter names
     final CompoundDataFactory localFactory1 = mock( CompoundDataFactory.class );
@@ -220,35 +222,33 @@ public class ParameterXmlContentHandlerTest {
     when( meth2.getReferencedFields( any( DataFactory.class ), anyString(), any( DataRow.class ) ) )
       .thenReturn( new String[] { "g1", "g2" } );
 
-    final HashNMap<String, String> parameters =
-      handler.getDependentParameters( computedParameterValues, parameterContext, report );
+    final ParameterDependencyGraph parameters =
+      new ParameterDependencyGraph(report, entries, parameterContext, new HashMap<>() );
 
-    assertNotNull( parameters );
-    assertFalse( parameters.isEmpty() );
-    assertEquals( 4, parameters.keySet().size() );
+    assertEquals( asSet("f1", "f2", "g1", "g2"), parameters.getKnownParameter() );
 
-    final List<String> list1 = Lists.newArrayList( parameters.getAll( "f1" ) );
+    final List<String> list1 = Lists.newArrayList( parameters.getDependentParameterFor( "f1" ) );
     assertFalse( list1.isEmpty() );
     assertEquals( 1, list1.size() );
     assertTrue( list1.contains( "name1" ) );
 
-    final List<String> list11 = Lists.newArrayList( parameters.getAll( "f2" ) );
+    final List<String> list11 = Lists.newArrayList( parameters.getDependentParameterFor( "f2" ) );
     assertFalse( list11.isEmpty() );
     assertEquals( 1, list11.size() );
     assertTrue( list11.contains( "name1" ) );
 
-    final List<String> list2 = Lists.newArrayList( parameters.getAll( "g1" ) );
+    final List<String> list2 = Lists.newArrayList( parameters.getDependentParameterFor( "g1" ) );
     assertFalse( list2.isEmpty() );
     assertEquals( 1, list2.size() );
     assertTrue( list2.contains( "name2" ) );
 
-    final List<String> list22 = Lists.newArrayList( parameters.getAll( "g1" ) );
+    final List<String> list22 = Lists.newArrayList( parameters.getDependentParameterFor( "g1" ) );
     assertFalse( list22.isEmpty() );
     assertEquals( 1, list22.size() );
     assertTrue( list22.contains( "name2" ) );
   }
 
-  private ParameterDefinitionEntry[] getDefinitions() {
+  private Map<String, ParameterDefinitionEntry> getDefinitions() {
     final ParameterDefinitionEntry entry1 = mock( ParameterDefinitionEntry.class );
     when( entry1.getName() ).thenReturn( "someName" );
 
@@ -258,14 +258,17 @@ public class ParameterXmlContentHandlerTest {
     final ParameterDefinitionEntry entry3 = new DefaultListParameter( "query2", "keyColumn2", "textColumn2", "name2",
       false, true, String.class );
 
-    return new ParameterDefinitionEntry[] { entry1, entry2, entry3 };
+    HashMap<String, ParameterDefinitionEntry> entries = new HashMap<>();
+    entries.put(entry1.getName(), entry1);
+    entries.put(entry2.getName(), entry2);
+    entries.put(entry3.getName(), entry3);
+    return entries;
   }
 
   @Test
   public void testComputeNormalizeLinage() {
     final ParameterContext pc = mock( ParameterContext.class );
     final ParameterDefinitionEntry pe = mock( ParameterDefinitionEntry.class );
-    final HashNMap<String, String> map = new HashNMap<>();
 
     when( pe.getName() ).thenReturn( "aname" );
 
@@ -281,23 +284,8 @@ public class ParameterXmlContentHandlerTest {
       eq( ParameterAttributeNames.Core.DISPLAY_VALUE_FORMULA ),
       eq( pc ) ) ).thenReturn( "=LEN([sPostal3])" );
 
-    handler.computeNormalLineage( pc, pe, map );
-
-    assertNotNull( map );
-    assertFalse( map.isEmpty() );
-    assertEquals( 3, map.keySet().size() );
-
-    final List<List<String>> list = new ArrayList<>();
-    list.add( Lists.newArrayList( map.getAll( "sPostal1" ) ) );
-    list.add( Lists.newArrayList( map.getAll( "sPostal2" ) ) );
-    list.add( Lists.newArrayList( map.getAll( "sPostal3" ) ) );
-
-    list.stream().forEach( i -> assertNotNull( i ) );
-    list.stream().forEach( i -> assertFalse( i.isEmpty() ) );
-    list.stream().forEach( i -> assertEquals( 1, i.size() ) );
-
-    final List empty = list.stream().filter( i -> i.contains( "aname" ) && ( i.size() == 1 ) ).collect( Collectors.toList() );
-    assertEquals( 3, list.size() );
+    final List<String> result = ParameterDependencyGraph.computeNormalLineage(pc, pe);
+    Assert.assertEquals(result, Arrays.asList("sPostal1", "sPostal2", "sPostal3"));
   }
 
   /**
@@ -388,14 +376,14 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "name", "dep1" );
-    dependencies.add( "name", "dep2" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "name", "dep1", "dep2");
+    dependencies.addDependency( "name", "dep1" );
+    dependencies.addDependency( "name", "dep2" );
 
     final Element element = handler.createParameterElement( parameter, context, null, dependencies, false );
     assertNotNull( element );
     handler.document.appendChild( element );
-    handler.createParameterDependencies( element, parameter, new HashNMap() );
+    handler.createParameterDependencies( element, parameter, dependencies );
 
     final String xml = toString( handler.document );
 
@@ -444,9 +432,9 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "name", "dep0" );
-    dependencies.add( "name", "dep1" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "name", "dep1", "dep2");
+    dependencies.addDependency( "name", "dep0" );
+    dependencies.addDependency( "name", "dep1" );
 
     final Element element = handler.createParameterElement( parameter, context, null, dependencies, false );
     assertNotNull( element );
@@ -457,6 +445,7 @@ public class ParameterXmlContentHandlerTest {
     assertTrue( isThereAttributes( handler.document ) );
 
     final String xml = toString( handler.document );
+    System.out.println(xml);
 
     // test dependencies specific elements:
     final XPath xpath = xpathFactory.newXPath();
@@ -529,14 +518,13 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "name", "dep1" );
-    dependencies.add( "name", "dep2" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "name", "dep1", "dep2");
+    dependencies.addDependency( "name", "dep1" );
+    dependencies.addDependency( "name", "dep2" );
 
     final Element element = handler.createParameterElement( parameter, context, null, dependencies, Boolean.TRUE );
     assertNotNull( element );
     handler.document.appendChild( element );
-    handler.createParameterDependencies( element, parameter, new HashNMap() );
 
     examineStandardXml( handler.document );
     assertFalse( isThereAttributes( handler.document ) );
@@ -555,14 +543,14 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "second", "third" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "second", "third" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
 
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, new HashMap(  ), null  );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, new HashMap<>(  ), new HashSet<>()  );
     examineInitialParameters( handler.document );
   }
 
@@ -579,22 +567,24 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "first", "fourth" );
-    dependencies.add( "second", "third" );
-    dependencies.add( "third", "seventh" );
-    dependencies.add( "second", "fourth" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third", "fourth", "fifth", "sixth");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "first", "fourth" );
+    dependencies.addDependency( "second", "third" );
+    dependencies.addDependency( "third", "seventh" );
+    dependencies.addDependency( "second", "fourth" );
     //How about some cycles?
-    dependencies.add( "fourth", "third" );
-    dependencies.add( "third", "fourth" );
+    dependencies.addDependency( "fourth", "third" );
+    dependencies.addDependency( "third", "fourth" );
     //Independent parameters
-    dependencies.add( "fifth", "sixth" );
+    dependencies.addDependency( "fifth", "sixth" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
 
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, new HashMap(  ), new String[]{"first"} );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions,
+        new HashMap<>(), new HashSet<>(Collections.singletonList("first")));
+    System.out.println(toString(handler.document));
     examineChangedDependentParameters( handler.document );
   }
 
@@ -611,14 +601,14 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "second", "third" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "second", "third" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
 
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, new HashedMap(  ), new String[]{"fourth"} );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, new HashMap<>(  ), new HashSet<>(Collections.singletonList("fourth")));
     examineChangedIndependentParameters( handler.document );
   }
 
@@ -637,9 +627,9 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "second", "third" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "second", "third" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
@@ -648,7 +638,7 @@ public class ParameterXmlContentHandlerTest {
     inputs.put( "first", new String[]{ "c11", "c10" } );
     inputs.put( "second", new String[]{ "c11", "c10" } );
     inputs.put( "third", new String[]{ "c11", "c10" } );
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, new String[]{"first"} );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, asSet("first") );
     examineChangedResetParameters( handler.document );
   }
 
@@ -666,9 +656,9 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "second", "third" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "second", "third" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
@@ -677,10 +667,13 @@ public class ParameterXmlContentHandlerTest {
     inputs.put( "first", new String[]{ "c11", "c10" } );
     inputs.put( "second", new String[]{ "c11", "c10" } );
     inputs.put( "third", new String[]{ "c11", "c10" } );
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, new String[]{"first", "second"} );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, asSet("first", "second"));
     examineChangedResetParameters( handler.document );
   }
 
+  Set<String> asSet(String... p) {
+    return new HashSet<>(Arrays.asList(p));
+  }
 
   @Test
   public void resetInputParentInTheMiddleChangedChildSentFromUI()
@@ -696,9 +689,9 @@ public class ParameterXmlContentHandlerTest {
 
     handler.document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
 
-    final HashNMap<String, String> dependencies = new HashNMap<>();
-    dependencies.add( "first", "second" );
-    dependencies.add( "second", "third" );
+    final ParameterDependencyGraph dependencies = new ParameterDependencyGraph(false, "first", "second", "third");
+    dependencies.addDependency( "first", "second" );
+    dependencies.addDependency( "second", "third" );
 
     final Element parameters = handler.document.createElement( "parameters" );
     handler.document.appendChild( parameters );
@@ -707,7 +700,7 @@ public class ParameterXmlContentHandlerTest {
     inputs.put( "first", new String[]{ "c11", "c10" } );
     inputs.put( "second", new String[]{ "c11", "c10" } );
     inputs.put( "third", new String[]{ "c11", "c10" } );
-    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, new String[]{"third", "second"} );
+    handler.appendParametersList( context, vr, parameters, dependencies, parameterDefinitions, inputs, asSet("third", "second") );
     examineChangedMiddleResetParameters( handler.document );
   }
 
